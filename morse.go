@@ -1,6 +1,9 @@
 package morse
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // Pin is an interface that allows the telegraph to be used with different
 // hardware. A Pin can be implemented with a GPIO pin or even a buzzer.
@@ -20,24 +23,33 @@ func NewTelegraph(dot time.Duration, pin Pin) *Telegraph {
 	return &Telegraph{dot: dot, pin: pin}
 }
 
-// Send encodes a message over the telegraph's Pin.
-func (t *Telegraph) Send(message string) {
-	for _, char := range message {
-		if char > 255 {
-			continue // Ignore non-ASCII characters.
-		}
-		t.sendASCII(byte(char))
-	}
+// InvalidCharacterError is returned when a character is not representable in
+// morse code.
+type InvalidCharacterError struct {
+	Char rune
 }
 
-func (t *Telegraph) sendASCII(char byte) {
-	if char >= 'a' && char <= 'z' {
-		// Is lower case, we convert to upper case.
-		char -= 32
+// Error implements the error interface.
+func (e InvalidCharacterError) Error() string {
+	return "morse: unrepresentable character \"" + string(e.Char) + "\""
+}
+
+// Send encodes a text message over the telegraph's Pin. If the message
+// contains unsupported characters, an InvalidCharacterError is returned.
+func (t *Telegraph) Send(message string) error {
+	for _, char := range message {
+		err := t.sendSingle(char)
+		if err != nil {
+			return err
+		}
 	}
-	code := morseTable[char]
-	if code == "" {
-		return // Ignore unknown characters.
+	return nil
+}
+
+func (t *Telegraph) sendSingle(char rune) error {
+	code, err := getMorse(char)
+	if err != nil {
+		return err
 	}
 	for _, symbol := range code {
 		if symbol != ' ' {
@@ -54,9 +66,58 @@ func (t *Telegraph) sendASCII(char byte) {
 		t.pin(false)
 		time.Sleep(t.dot) // Inter-character gap is 1 dot.
 	}
+	return nil
 }
 
-var morseTable = [256]string{
+// Code represents a morse code sequence. May be multiple or single characters.
+type Code struct {
+	c []string
+}
+
+// Encode encodes a utf8 text message into the Code type.
+func (c *Code) Encode(message string) error {
+	for _, char := range message {
+		code, err := getMorse(char)
+		if err != nil {
+			return err
+		}
+		c.c = append(c.c, code)
+	}
+	return nil
+}
+
+// String returns the morse code sequence as a string. Characters are separated
+// by a space, words are separated by 2 spaces.
+func (c *Code) String() string {
+	return strings.Join(c.c, " ")
+}
+
+// LetterCode returns a morse code sequence for the given character.
+// If the character is not representable in morse code an InvalidCharacterError is returned.
+func LetterCode(char rune) (Code, error) {
+	code, err := getMorse(char)
+	if err != nil {
+		return Code{}, err
+	}
+	return Code{c: []string{code}}, nil
+}
+
+func getMorse(char rune) (string, error) {
+	if char > 255 {
+		return "", InvalidCharacterError{Char: char} // UTF8 unsupported.
+	}
+	if char >= 'a' && char <= 'z' {
+		// Is lower case, we convert to upper case.
+		char -= 32
+	}
+	code := morseASCIITable[char]
+	if code == "" {
+		return "", InvalidCharacterError{Char: rune(char)}
+	}
+	return code, nil
+}
+
+var morseASCIITable = [256]string{
 	' ': " ",
 	'A': "*-",
 	'B': "-***",
