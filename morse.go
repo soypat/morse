@@ -38,6 +38,12 @@ func (e InvalidCharacterError) Error() string {
 // contains unsupported characters, an InvalidCharacterError is returned.
 func (t *Telegraph) Send(message string) error {
 	for _, char := range message {
+		_, err := getMorse(char) // Check for unsupported characters.
+		if err != nil {
+			return err
+		}
+	}
+	for _, char := range message {
 		err := t.sendSingle(char)
 		if err != nil {
 			return err
